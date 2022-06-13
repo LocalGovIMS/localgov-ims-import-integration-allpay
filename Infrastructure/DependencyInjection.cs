@@ -1,8 +1,4 @@
-﻿using Application.Clients.CybersourceRestApiClient.Interfaces;
-using Infrastructure.Clients;
-using Microsoft.Extensions.DependencyInjection;
-using Infrastructure.Data;
-using Application.Data;
+﻿using Microsoft.Extensions.DependencyInjection;
 
 namespace Infrastructure
 {
@@ -10,9 +6,6 @@ namespace Infrastructure
     {
         public static IServiceCollection AddInfrastructure(this IServiceCollection services)
         {
-            services.AddTransient<ICybersourceRestApiClient, CybersourceRestApiClient>();
-            services.AddScoped(typeof(IAsyncRepository<>), typeof(EfRepository<>));
-
             return services;
         }
     }

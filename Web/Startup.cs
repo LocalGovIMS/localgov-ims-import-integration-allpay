@@ -1,6 +1,5 @@
 using Application;
 using Infrastructure;
-using Infrastructure.Data;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
@@ -8,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System;
+using System.IO.Abstractions;
 
 namespace Web
 {
@@ -26,17 +26,8 @@ namespace Web
             services.AddControllersWithViews();
             services.AddApplication(Configuration);
             services.AddInfrastructure();
-
             services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 
-            services.AddDbContext<SmartPayFuseDbContext>((serviceProvider, optionsBuilder) =>
-                {
-                optionsBuilder.UseSqlServer(Configuration.GetConnectionString("ImsSmartPayFuseDatabase"), sqlServerOptions => { sqlServerOptions.CommandTimeout(30); });
-                optionsBuilder.EnableDetailedErrors();
-                optionsBuilder.EnableSensitiveDataLogging();
-                },
-                ServiceLifetime.Transient
-            );
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.

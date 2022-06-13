@@ -1,14 +1,12 @@
 ﻿using Application.Behaviours;
-using Application.Builders;
 using Application.Cryptography;
-using Application.Models;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Microsoft.Extensions.Configuration;
-using Application.Entities;
-
+using System.IO.Abstractions;
+using System.IO;
 
 namespace Application
 {
@@ -20,10 +18,8 @@ namespace Application
             services.AddMediatR(Assembly.GetExecutingAssembly());
             services.AddTransient(typeof(IPipelineBehavior<,>), typeof(UnhandledExceptionBehaviour<,>));
             services.AddTransient(typeof(IPipelineBehavior<,>), typeof(PerformanceBehaviour<,>));
-
             services.AddTransient<ICryptographyService, MD5CryptographyService>();
-            services.AddTransient<IBuilder<PaymentBuilderArgs, SmartPayFusePayment>, PaymentBuilder>();
-
+            services.AddTransient<IFileSystem, FileSystem>();
             AddLocalGovImsApiClients(services, configuration);
 
             return services;
