@@ -1,12 +1,11 @@
 ﻿using Application.Behaviours;
-using Application.Cryptography;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Microsoft.Extensions.Configuration;
 using System.IO.Abstractions;
-using System.IO;
+
 
 namespace Application
 {
@@ -18,7 +17,6 @@ namespace Application
             services.AddMediatR(Assembly.GetExecutingAssembly());
             services.AddTransient(typeof(IPipelineBehavior<,>), typeof(UnhandledExceptionBehaviour<,>));
             services.AddTransient(typeof(IPipelineBehavior<,>), typeof(PerformanceBehaviour<,>));
-            services.AddTransient<ICryptographyService, MD5CryptographyService>();
             services.AddTransient<IFileSystem, FileSystem>();
             AddLocalGovImsApiClients(services, configuration);
 
@@ -34,7 +32,7 @@ namespace Application
             services.AddTransient<LocalGovImsApiClient.Api.IMethodOfPaymentsApi>(s => new LocalGovImsApiClient.Api.MethodOfPaymentsApi(localGovImsApiBaseUrl));
             services.AddTransient<LocalGovImsApiClient.Api.IPendingTransactionsApi>(s => new LocalGovImsApiClient.Api.PendingTransactionsApi(localGovImsApiBaseUrl));
             services.AddTransient<LocalGovImsApiClient.Api.IProcessedTransactionsApi>(s => new LocalGovImsApiClient.Api.ProcessedTransactionsApi(localGovImsApiBaseUrl));
-
+            services.AddTransient<LocalGovImsApiClient.Api.ITransactionImportApi>(s => new LocalGovImsApiClient.Api.TransactionImportApi(localGovImsApiBaseUrl));
             return services;
         }
     }

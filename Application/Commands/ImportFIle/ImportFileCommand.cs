@@ -2,13 +2,13 @@
 using MediatR;
 using System.Threading.Tasks;
 using System.Threading;
-using System.IO;
 using LocalGovImsApiClient.Model;
 using System;
 using System.Globalization;
 using System.Linq;
 using System.Collections.Generic;
 using System.IO.Abstractions;
+using Application.Extensions;
 
 namespace Application.Commands
 {
@@ -21,62 +21,117 @@ namespace Application.Commands
     {
         private readonly IConfiguration _configuration;
         private readonly IFileSystem _fileSystem;
+        private readonly LocalGovImsApiClient.Api.ITransactionImportApi _transactionImportApi;
 
-        private ImportFileCommandResult _result = new ImportFileCommandResult();
-        private string _fileLocation;
-        private string[] _lines;
-        private List<ProcessedTransactionModel> _transactions = new List<ProcessedTransactionModel>();
-        private Random _randomGenerator = new Random();
+        private ImportFileCommandResult _result = new();
+        private ImportFileModel _importFileModel = new();
+        private TransactionImportModel _transactionImportModel = new();
+        private IEnumerable<string> _files;
         private decimal _fileTotalAmount;
         private int _fileTotalTransactionCount;
 
         public ImportFileCommandHandler(
             IConfiguration configuration,
-            IFileSystem file)
+            IFileSystem file,
+            LocalGovImsApiClient.Api.ITransactionImportApi transactionImportApi)
         {
             _configuration = configuration;
             _fileSystem = file;
+            _transactionImportApi = transactionImportApi;
         }
 
         public async Task<ImportFileCommandResult> Handle(ImportFileCommand request, CancellationToken cancellationToken)
         {
-            GetFileLocation();
+            GetTransactionDefaultValues();
 
-            ReadFile();
+            GetFileConfiDetails();
 
-            if (_result.ErrorsDetected == 0)
-            {
-                PostFile();
-            }
+            GetFiles();
+
+            await ProcessFiles(cancellationToken);
 
             //TODO: how is file moved so it isnt processed again
+
+            SetUpResult();
 
             return _result;
         }
 
-        private void GetFileLocation()
+        private void GetTransactionDefaultValues()
         {
-            //TODO: is there any validation needed on checking have the right file eg checking name? extension?
-            _fileLocation = _configuration.GetValue<string>("FileDetails:Location");
-
+            _importFileModel.BenefitOverpaymentFundCode = _configuration.GetValue<string>("TransactionDefaultValues:BenefitOverpaymentFundCode");
+            _importFileModel.BusinessRatesFundCode = _configuration.GetValue<string>("TransactionDefaultValues:BusinessRatesFundCode");
+            _importFileModel.CouncilTaxFundCode = _configuration.GetValue<string>("TransactionDefaultValues:CouncilTaxFundCode");
+            _importFileModel.HousingRentsFundCode = _configuration.GetValue<string>("TransactionDefaultValues:HousingRentsFundCode");
+            _importFileModel.OldCouncilTaxFundCode = _configuration.GetValue<string>("TransactionDefaultValues:OldCouncilTaxFundCode");
+            _importFileModel.OldNonDomesticRatesFundCode = _configuration.GetValue<string>("TransactionDefaultValues:OldNonDomesticRatesFundCode");
+            _importFileModel.SapInvoicesFundCode = _configuration.GetValue<string>("TransactionDefaultValues:SapInvoicesFundCode");
+            _importFileModel.SuspenseFundCode = _configuration.GetValue<string>("TransactionDefaultValues:SuspenseFundCode");
+            _importFileModel.MopCodePostOffice = _configuration.GetValue<string>("TransactionDefaultValues:MopCodePostOffice");
+            _importFileModel.MopCodeCashAdjustment = _configuration.GetValue<string>("TransactionDefaultValues:MopCodeCashAdjustment");
+            _importFileModel.MopCodeReturnedCheque = _configuration.GetValue<string>("TransactionDefaultValues:MopCodeReturnedCheque");
+            _importFileModel.MopCodePayPoint = _configuration.GetValue<string>("TransactionDefaultValues:MopCodePayPoint");
+            _importFileModel.MopCodePayzone = _configuration.GetValue<string>("TransactionDefaultValues:MopCodePayzone");
+            _importFileModel.MopCodeIVRDesktop = _configuration.GetValue<string>("TransactionDefaultValues:MopCodeIVRDesktop");
+            _importFileModel.MopCodeBillsOnline = _configuration.GetValue<string>("TransactionDefaultValues:MopCodeBillsOnline");
+            _importFileModel.MopCodeOther = _configuration.GetValue<string>("TransactionDefaultValues:MopCodeOther");
+            _importFileModel.PaymentTypePostOffice = _configuration.GetValue<string>("TransactionDefaultValues:PaymentTypePostOffice");
+            _importFileModel.PaymentTypeCashAdjustment = _configuration.GetValue<string>("TransactionDefaultValues:PaymentTypeCashAdjustment");
+            _importFileModel.PaymentTypeReturnedCheque = _configuration.GetValue<string>("TransactionDefaultValues:PaymentTypeReturnedCheque");
+            _importFileModel.PaymentTypePayPoint = _configuration.GetValue<string>("TransactionDefaultValues:PaymentTypePayPoint");
+            _importFileModel.PaymentTypePayzone = _configuration.GetValue<string>("TransactionDefaultValues:PaymentTypePayzone");
+            _importFileModel.PaymentTypeIVRDesktop = _configuration.GetValue<string>("TransactionDefaultValues:PaymentTypeIVRDesktop");
+            _importFileModel.PaymentTypeBillsOnline = _configuration.GetValue<string>("TransactionDefaultValues:PaymentTypeBillsOnline");
+            _importFileModel.OfficeCode = _configuration.GetValue<string>("TransactionDefaultValues:OfficeCode");
+            _importFileModel.SuspenseVatCode = _configuration.GetValue<string>("TransactionDefaultValues:SuspenseVatCode");
+            _importFileModel.SapDebtorVatCode = _configuration.GetValue<string>("TransactionDefaultValues:SapDebtorVatCode");
+            _importFileModel.VatCode = _configuration.GetValue<string>("TransactionDefaultValues:VatCode");
+            _importFileModel.TransactionImportTypeId = _configuration.GetValue<int>("TransactionDefaultValues:TransactionImportTypeId");
+            _importFileModel.TransactionImportTypeDescription = _configuration.GetValue<string>("TransactionDefaultValues:TransactionImportTypeDescription");
+            _importFileModel.PSPReferencePrefix = _configuration.GetValue<string>("TransactionDefaultValues:PSPReferencePrefix");
         }
-        private void ReadFile()
+
+        private void GetFileConfiDetails()
+        {
+            _importFileModel.Path = _configuration.GetValue<string>("FileDetails:Path");
+            _importFileModel.SearchPattern = _configuration.GetValue<string>("FileDetails:SearchPattern");
+            _importFileModel.MaximumProcessableLineLength = _configuration.GetValue<int>("FileDetails:MaximumProcessableLineLength");
+        }
+
+        private void GetFiles()
+        {
+            _files = _fileSystem.Directory.GetFiles(_importFileModel.Path, _importFileModel.SearchPattern);
+        }
+
+        private async Task ProcessFiles(CancellationToken cancellationToken)
+        {
+            Prepare();
+
+            // TODO: need to decide if processing more than one file at a time
+            foreach (var file in _files)
+            {
+                await ReadFile(file, cancellationToken);
+
+                await PostFileAsync();
+            }
+            //TODO: how is file moved so it isnt processed again
+        }
+
+        private void Prepare()
+        {
+            _transactionImportModel.Initialise();
+        }
+
+        private async Task ReadFile(string file, CancellationToken cancellationToken)
         {
             //TODO: are we loading multiple files or just one at a time?
             int lineCount = 0;
-            decimal fileTotal = 0;
             bool endOfFile = false;
-            _result.FilesProcessed++;
-            _lines = _fileSystem.File.ReadAllLines(_fileLocation);
+            var _lines = await _fileSystem.File.ReadAllLinesAsync(file, cancellationToken);
             foreach (var line in _lines)
             {
-                var transaction = new ProcessedTransactionModel() { 
-                    OfficeCode = "99",
-                    EntryDate = DateTime.Now,
-                    VatAmount = 0,
-                    VatRate = 0,
-                    UserCode = 0
-                };
+                var transaction = new ProcessedTransactionModel();
+                transaction.SetStaticValues(_importFileModel);
                 try
                 {
                     lineCount++;
@@ -89,42 +144,42 @@ namespace Application.Commands
                         endOfFile = true;
                         continue;
                     }
-                    if (line.Length < 43) { throw new Exception("File line item wrong length"); }
-            //        transaction.Reference = lineCount + GetNextReferenceId(_randomGenerator);
-                    transaction.InternalReference = transaction.Reference;
-                    transaction.PspReference = transaction.Reference;
+                    if (line.Length < _importFileModel.MaximumProcessableLineLength) { throw new Exception("File line item wrong length"); }
+                    transaction.PspReference = _importFileModel.PSPReferencePrefix + DateTime.Now.ToString("yyMMddhhmm") + lineCount;
                     transaction.TransactionDate = DateTime.ParseExact(line.Substring(33, 10).ToString(), "dd/MM/yyyy", CultureInfo.InvariantCulture);
-
                     transaction.AccountReference = SetAccountReference(line);
-
                     transaction.FundCode = SetFundCode(transaction.AccountReference);
-
                     transaction.VatCode = SetVatCode(transaction.FundCode);
-
                     transaction.MopCode = SetMopCode(line.Substring(32, 1));
-
-
                     var amount = line.Substring(23, 9).Trim();
                     transaction.Amount = decimal.Parse(amount);
                     transaction.Narrative = line.Substring(0, 7).Trim();
-                    //       transaction.BatchReference = batchref;  //TODO: is batch reference going
-
-                    _transactions.Add(transaction);
-                    fileTotal += transaction.Amount.Value;
+                    _transactionImportModel.Rows.Add(transaction);
                 }
                 catch (Exception exception)
                 {
-                    _result.ErrorString.Add("Threw an error on line " + lineCount + " - " + exception.Message);
-                    _result.ErrorsDetected++;
+                    _transactionImportModel.Errors.Add("Threw an error on line " + lineCount + " - " + exception.Message);
                 }
             }
-
-            CheckFileTotalsAreCorrect(fileTotal);
+            CheckFileTotalsAreCorrect();
         }
 
-        private void PostFile()
+        private async Task PostFileAsync()
         {
-            _result.Success = true;
+            _transactionImportModel.ImportTypeId = _importFileModel.TransactionImportTypeId;
+            _transactionImportModel.NumberOfRows = _transactionImportModel.Rows?.Count() ?? 0;
+            try
+            {
+                var result = await _transactionImportApi.TransactionImportPostAsync(_transactionImportModel);
+                if (result == null)
+                {
+                    throw new Exception("IMSApi not found to post the transactions");
+                }
+            }
+            catch (Exception exception)
+            {
+                _transactionImportModel.Errors.Add(exception.Message);
+            }
         }
 
         private string SetAccountReference(string line)
@@ -141,87 +196,81 @@ namespace Application.Commands
 
         private string SetFundCode(string accountReference)
         {
-            if (accountReference.StartsWith("6"))
+            if (accountReference.IsHousingRents())
             {
-                return "05";
+                return _importFileModel.HousingRentsFundCode;
             }
-            else if (accountReference.StartsWith("55"))
+            else if (accountReference.IsOldNonDomesticRates())
             {
-                return "03";
+                return _importFileModel.OldNonDomesticRatesFundCode;
             }
-            else if (accountReference.StartsWith("95"))
+            else if (accountReference.IsSapInvoice())
             {
-                return "19";
+                return _importFileModel.SapInvoicesFundCode;
             }
-            else if (accountReference.StartsWith("77") && accountReference.All(char.IsDigit))
+            else if (accountReference.IsCouncilTax())
             {
-                return "23";
+                return _importFileModel.CouncilTaxFundCode;
             }
-            else if (accountReference.StartsWith("56") && accountReference.All(char.IsDigit))
+            else if (accountReference.IsBusinessRates())
             {
-                return "24";
+                return  _importFileModel.BusinessRatesFundCode;
             }
-            else if (accountReference.StartsWith("70") && accountReference.Length > 8 && accountReference.All(char.IsDigit))
+            else if (accountReference.IsOldCouncilTax())
             {
-                return "02";
+                return _importFileModel.OldCouncilTaxFundCode;
             }
-            else if (accountReference.StartsWith("70") && accountReference.All(char.IsDigit))
+            else if (accountReference.IsBenefitOverpayment())
             {
-                return "25";
+                return _importFileModel.BenefitOverpaymentFundCode;
             }
-            else
-            {
-                return "SP";
-            }
+            return _importFileModel.SuspenseFundCode;
         }
 
         private string SetVatCode(string fundcode)
         {
-            if (fundcode == "19")
+            if (fundcode == _importFileModel.SapInvoicesFundCode)
             {
-                return "11";
+                return _importFileModel.SapDebtorVatCode;
             }
-            else if (fundcode == "SP")
+            else if (fundcode == _importFileModel.SuspenseFundCode)
             {
-                return "M0";
+                return _importFileModel.SuspenseVatCode;
             }
-            else { return "N0"; } 
+            return _importFileModel.VatCode;
         }
 
         private string SetMopCode(string mopType)
         {
-            if (mopType == "P")
+            if (mopType == _importFileModel.PaymentTypePostOffice)
             {
-                return "15";
+                return _importFileModel.MopCodePostOffice;
             }
-            else if (mopType == "C")
+            else if (mopType == _importFileModel.PaymentTypeCashAdjustment)
             {
-                return "16";
+                return  _importFileModel.MopCodeCashAdjustment;
             }
-            else if (mopType == "Q")
+            else if (mopType == _importFileModel.PaymentTypeReturnedCheque)
             {
-                return "17";
+                return _importFileModel.MopCodeReturnedCheque;
             }
-            else if (mopType == "T")
+            else if (mopType == _importFileModel.PaymentTypePayPoint)
             {
-                return "18";
+                return _importFileModel.MopCodePayPoint;
             }
-            else if (mopType == "Z")
+            else if (mopType == _importFileModel.PaymentTypePayzone)
             {
-                return "19";
+                return _importFileModel.MopCodePayzone;
             }
-            else if (mopType == "N")
+            else if (mopType == _importFileModel.PaymentTypeIVRDesktop)
             {
-                return "20";
+                return _importFileModel.MopCodeIVRDesktop;
             }
-            else if (mopType == "B")
+            else if (mopType == _importFileModel.PaymentTypeBillsOnline)
             {
-                return "21";
+                return _importFileModel.MopCodeBillsOnline;
             }
-            else
-            {
-                return "22";
-            }
+            return _importFileModel.MopCodeOther;
         }
         
         private  void ProcessFileTotalRecords(string line)
@@ -235,8 +284,7 @@ namespace Application.Commands
                 }
                 catch(Exception e)
                 {
-                    _result.ErrorString.Add("Unable to read/convert Total Amount value on the file - " + e.Message);
-                    _result.ErrorsDetected++;
+                    _transactionImportModel.Errors.Add("Unable to read/convert Total Amount value on this file - " + e.Message);
                 }
             }
             if (line.StartsWith("Total Transactions"))
@@ -248,31 +296,27 @@ namespace Application.Commands
                 }
                 catch (Exception e)
                 {
-                    _result.ErrorString.Add("Unable to read/convert Total Transactions count on the file - " + e.Message);
-                    _result.ErrorsDetected++;
+                    _transactionImportModel.Errors.Add("Unable to read/convert Total Transactions count on this file - " + e.Message);
                 }
             }
         }
 
-        private  void CheckFileTotalsAreCorrect(decimal fileTotal)
+        private  void CheckFileTotalsAreCorrect()
         {
-            if (_fileTotalAmount != fileTotal ) 
+            if (_fileTotalAmount != _transactionImportModel.Rows.Sum(x => x.Amount))
             {
-                _result .ErrorString.Add("The files Total Amount of " + _fileTotalAmount + " does not match the total calculated by the import of " + fileTotal);
-                _result.ErrorsDetected++;
+                _transactionImportModel.Errors.Add("The files Total Amount of " + _fileTotalAmount + " does not match the total calculated by the import of " + _transactionImportModel.Rows.Sum(x => x.Amount));
             }
-            if (_fileTotalTransactionCount != _transactions.Count)
+            int numberOfRows = _transactionImportModel.Rows?.Count() ?? 0;
+            if (_fileTotalTransactionCount != numberOfRows)
             {
-                _result.ErrorString.Add("The files Total Transaction count of " + _fileTotalTransactionCount + " does not match the total calculated by the import of " + _transactions.Count);
-                _result.ErrorsDetected++;
+                _transactionImportModel.Errors.Add("The files Total Transaction count of " + _fileTotalTransactionCount + " does not match the total calculated by the import of " + numberOfRows);
             }
         }
 
-        //internal static string GetNextReferenceId(Random randomGenerator)
-        //{
-        //   var hash = new Hashids("BMBC", 9);
-        //    return hash.Encode(DateTime.Now.Millisecond, randomGenerator.Next(999999));
-        //}
-
+        private void SetUpResult()
+        {
+            _result.Errors = _transactionImportModel.Errors;
+        }
     }
 }
