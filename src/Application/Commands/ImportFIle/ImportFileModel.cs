@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿
 
 namespace Application.Commands
 {
@@ -13,6 +9,8 @@ namespace Application.Commands
         public string SearchPattern { get; set; }
 
         public int MaximumProcessableLineLength { get; set; }
+
+        public string ArchivePath { get; set; }
 
         public int TransactionImportTypeId { get; set; }
 
@@ -62,11 +60,7 @@ namespace Application.Commands
 
         public string OldCouncilTaxFundCode { get; set; }
 
-        public string OldDebtorFundCode { get; set; }
-
         public string OldNonDomesticRatesFundCode { get; set; }
-
-        public string ParkingFinesFundCode { get; set; }
 
         public string SapInvoicesFundCode { get; set; }
 

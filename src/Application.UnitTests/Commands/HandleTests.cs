@@ -50,6 +50,9 @@ namespace Application.UnitTests.Commands
             var maximumProcessableLineLengthConfigSection = new Mock<IConfigurationSection>();
             maximumProcessableLineLengthConfigSection.Setup(a => a.Value).Returns("43");
 
+            var archivePathConfigSection = new Mock<IConfigurationSection>();
+            archivePathConfigSection.Setup(a => a.Value).Returns("c:\\archive\\");
+
             var benefitOverpaymentFundCodeConfigSection = new Mock<IConfigurationSection>();
             benefitOverpaymentFundCodeConfigSection.Setup(a => a.Value).Returns("25");
 
@@ -143,6 +146,7 @@ namespace Application.UnitTests.Commands
             _mockConfiguration.Setup(x => x.GetSection("FileDetails:Path")).Returns(pathConfigSection.Object);
             _mockConfiguration.Setup(x => x.GetSection("FileDetails:SearchPattern")).Returns(searchPatternConfigSection.Object);
             _mockConfiguration.Setup(x => x.GetSection("FileDetails:MaximumProcessableLineLength")).Returns(maximumProcessableLineLengthConfigSection.Object);
+            _mockConfiguration.Setup(x => x.GetSection("FileDetails:ArchivePath")).Returns(archivePathConfigSection.Object);
             _mockConfiguration.Setup(x => x.GetSection("TransactionDefaultValues:BenefitOverpaymentFundCode")).Returns(benefitOverpaymentFundCodeConfigSection.Object);
             _mockConfiguration.Setup(x => x.GetSection("TransactionDefaultValues:BusinessRatesFundCode")).Returns(businessRatesFundCodeConfigSection.Object);
             _mockConfiguration.Setup(x => x.GetSection("TransactionDefaultValues:CouncilTaxFundCode")).Returns(councilTaxFundCodeConfigSection.Object);
@@ -178,6 +182,11 @@ namespace Application.UnitTests.Commands
             _mockFileSystem.Setup(f => f.Directory.GetFiles(It.IsAny<string>(), It.IsAny<string>())).Returns(new[] { "c:\\Bert.pp" });
             //        _mockFileSystem.Setup(f => f.Directory.GetFiles(It.IsAny<string>(), It.IsAny<string>())).Returns(new[] { "c:\\Jacobs.txt", "c:\\Jacobs2.txt" });
 
+            _mockFileSystem.Setup(x => x.Path.GetFileName(It.IsAny<string>()))
+              .Returns("archiveFileName.csv");
+
+            _mockFileSystem.Setup(x => x.File.Copy(It.IsAny<string>(), It.IsAny<string>(), true));
+
             _mockFileSystem.Setup(x => x.File.ReadAllLinesAsync(It.IsAny<string>(), new CancellationToken()))
                 .ReturnsAsync(new string[] { "A line of data" });
 
@@ -196,7 +205,7 @@ namespace Application.UnitTests.Commands
             // Arrange
             SetUpCommand();
             //Act
-            var result = await _commandHandler.Handle(_command, new System.Threading.CancellationToken());
+            var result = await _commandHandler.Handle(_command, new CancellationToken());
             //Assert
             result.Should().BeOfType<ImportFileCommandResult>();
         }
@@ -205,10 +214,43 @@ namespace Application.UnitTests.Commands
         public async Task Throws_error_when_line_length_not_long_enought()
         {
             // Arrange
-            SetUpCommand();
+            ImportFileModel importFileModel = new()
+            {
+                CouncilTaxFundCode = "23",
+                BusinessRatesFundCode = "24",
+                SapInvoicesFundCode = "19",
+                BenefitOverpaymentFundCode = "25",
+                HousingRentsFundCode = "05",
+                OldCouncilTaxFundCode = "02",
+                OldNonDomesticRatesFundCode = "03",
+                SuspenseFundCode = "SP",
+                VatCode = "N0",
+                SapDebtorVatCode = "11",
+                SuspenseVatCode = "M0",
+                PSPReferencePrefix = "AllPay",
+                MopCodePostOffice = "15",
+                MopCodeCashAdjustment = "16",
+                MopCodeReturnedCheque = "17",
+                MopCodePayPoint = "18",
+                MopCodePayzone = "19",
+                MopCodeIVRDesktop = "20",
+                MopCodeBillsOnline = "21",
+                MopCodeOther = "22",
+                PaymentTypePostOffice = "P",
+                PaymentTypeCashAdjustment = "C",
+                PaymentTypeReturnedCheque = "Q",
+                PaymentTypePayPoint = "T",
+                PaymentTypePayzone = "Z",
+                PaymentTypeIVRDesktop = "N",
+                PaymentTypeBillsOnline = "B",
+                OfficeCode = "99",
+                MaximumProcessableLineLength = 43
+            };
+            _mockFileSystem.Setup(x => x.File.ReadAllLinesAsync(It.IsAny<string>(), new CancellationToken()))
+                .ReturnsAsync(new string[] { " 3356107000669297      60.00T31/06/2022" });
 
             //Act
-            var result = await _commandHandler.Handle(_command, new System.Threading.CancellationToken());
+            var result = await _commandHandler.Handle(_command, new CancellationToken());
 
             //Assert
             result.Should().BeOfType<ImportFileCommandResult>();
@@ -222,10 +264,9 @@ namespace Application.UnitTests.Commands
             // Arrange
             _mockFileSystem.Setup(x => x.File.ReadAllLinesAsync(It.IsAny<string>(), new CancellationToken()))
                 .ReturnsAsync(new string[] { " 3356107000669297          60.00T31/06/2022" }); 
-            SetUpCommand();
 
             //Act
-            var result = await _commandHandler.Handle(_command, new System.Threading.CancellationToken());
+            var result = await _commandHandler.Handle(_command, new CancellationToken());
 
             //Assert
             result.Should().BeOfType<ImportFileCommandResult>();
@@ -242,7 +283,7 @@ namespace Application.UnitTests.Commands
             SetUpCommand();
 
             //Act
-            var result = await _commandHandler.Handle(_command, new System.Threading.CancellationToken());
+            var result = await _commandHandler.Handle(_command, new CancellationToken());
 
             //Assert
             result.Should().BeOfType<ImportFileCommandResult>();
@@ -257,7 +298,7 @@ namespace Application.UnitTests.Commands
             string[] lines = new string[4];
             lines[0] = " 3356107000669297          60.00T30/06/2022";
             lines[1] = "";
-            lines[2] = "Total Amount Updated onto System:            ";
+            lines[2] = "Total Amount Updated onto System:                                ";
             lines[3] = "Total Transactions updated onto System:                 4";
 
 
@@ -266,12 +307,36 @@ namespace Application.UnitTests.Commands
             SetUpCommand();
 
             //Act
-            var result = await _commandHandler.Handle(_command, new System.Threading.CancellationToken());
+            var result = await _commandHandler.Handle(_command, new CancellationToken());
 
             //Assert
             result.Should().BeOfType<ImportFileCommandResult>();
             result.Success.Should().Be(false);
-            result.Errors[0].Should().Contain("Unable to read/convert Total Amount value on this file");
+            result.Errors[0].Should().Contain("Input string was not in a correct format");
+        }
+
+        [Fact]
+        public async Task Throws_error_when_total_line_too_short()
+        {
+            // Arrange
+            string[] lines = new string[4];
+            lines[0] = " 3356107000669297          60.00T30/06/2022";
+            lines[1] = "";
+            lines[2] = "Total Amount Updated onto System:                ";
+            lines[3] = "Total Transactions updated onto System:                 4";
+
+
+            _mockFileSystem.Setup(x => x.File.ReadAllLinesAsync(It.IsAny<string>(), new CancellationToken()))
+                .ReturnsAsync(lines);
+            SetUpCommand();
+
+            //Act
+            var result = await _commandHandler.Handle(_command, new CancellationToken());
+
+            //Assert
+            result.Should().BeOfType<ImportFileCommandResult>();
+            result.Success.Should().Be(false);
+            result.Errors[0].Should().Contain("Index and length must refer to a location within the string");
         }
 
         [Fact]
@@ -281,7 +346,7 @@ namespace Application.UnitTests.Commands
             string[] lines = new string[4];
             lines[0] = " 3356107000669297          60.00T30/06/2022";
             lines[1] = "";
-            lines[2] = "Total Amount Updated onto System:            419.00";
+            lines[2] = "Total Amount Updated onto System:             60.00";
             lines[3] = "Total Transactions updated onto System:";
 
 
@@ -290,12 +355,12 @@ namespace Application.UnitTests.Commands
             SetUpCommand();
 
             //Act
-            var result = await _commandHandler.Handle(_command, new System.Threading.CancellationToken());
+            var result = await _commandHandler.Handle(_command, new CancellationToken());
 
             //Assert
             result.Should().BeOfType<ImportFileCommandResult>();
             result.Success.Should().Be(false);
-            result.Errors[0].Should().Contain("Unable to read/convert Total Transactions count on this file");
+            result.Errors[0].Should().Contain("Threw an error on line 4");
         }
 
         [Fact]
@@ -313,7 +378,7 @@ namespace Application.UnitTests.Commands
             SetUpCommand();
 
             //Act
-            var result = await _commandHandler.Handle(_command, new System.Threading.CancellationToken());
+            var result = await _commandHandler.Handle(_command, new CancellationToken());
 
             //Assert
             result.Should().BeOfType<ImportFileCommandResult>();
@@ -337,7 +402,7 @@ namespace Application.UnitTests.Commands
             SetUpCommand();
 
             //Act
-            var result = await _commandHandler.Handle(_command, new System.Threading.CancellationToken());
+            var result = await _commandHandler.Handle(_command, new CancellationToken());
 
             //Assert
             result.Should().BeOfType<ImportFileCommandResult>();
@@ -362,7 +427,7 @@ namespace Application.UnitTests.Commands
             SetUpCommand();
 
             //Act
-            var result = await _commandHandler.Handle(_command, new System.Threading.CancellationToken());
+            var result = await _commandHandler.Handle(_command, new CancellationToken());
 
             //Assert
             result.Should().BeOfType<ImportFileCommandResult>();
